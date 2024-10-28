@@ -1,7 +1,10 @@
 #include <DHT.h>
 #include <DHT_U.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
 
 #define DHTPIN D5
 #define DHTTYPE DHT11
@@ -9,18 +12,22 @@
 // Wi-Fi
 WiFiClient espClient;
 PubSubClient client(espClient);
-const char* ssid = "wifi_ssid_here";
-const char* password = "wifi_password_here";
+const char* ssid = "ecogarden";
+const char* password = "camposss";
+
+// Local server
+ESP8266WebServer server(80);
+
+HTTPClient http;
 
 // Website
-const char* webUrl = "website_url_here";
-const char* webUser = "website_user_here";
-const char* webPassword = "website_user_password_here";
+const char* webUrl = "https://ecogarden.vercel.app";
+const char* webToken = "website_token_here";
 
 // Humidity sensor
-DHT dht (DHTPIN, DHTTYPE);
+DHT dht(DHTPIN, DHTTYPE);
 
-void setupWifi() {
+void definirWifi() {
   delay(100);
 
   Serial.println("");
@@ -38,6 +45,37 @@ void setupWifi() {
 
   Serial.println("");
   Serial.println("Connected to Wi-Fi.");
+  Serial.println(WiFi.localIP());
+}
+
+void lidarServidorRemotoNaoEncontrado() {
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nHeaders: ";
+  message += server.headers();
+  message += "\n\n";
+  server.send(404, "text/plain", message);
+}
+
+void definirServidorRemoto() {
+  server.on("/", []() {
+    server.send(200, "text/html", "<h1>Eco Garden</h1>");
+  });
+
+  server.on("/api/v1/token", HTTP_POST, []() {
+    String token = server.arg("plain");
+    
+    const char* webTokenStr = token.c_str();
+    webToken = webTokenStr;
+    
+    server.send(200, "application/json", "{\"message\": \"Token received\"}");
+  }, lidarComServidorRemotoNaoEncontrado);
+
+  server.onNotFound(lidarComServidorRemotoNaoEncontrado);
+  server.begin();
 }
 
 void setup() {
@@ -46,15 +84,16 @@ void setup() {
   // Sensors
   dht.begin();
 
-  setupWifi();
+  definirWifi();
+  definirServidorRemoto();
 
   delay(2000);
 }
 
-String getHumidity() {
+String lerHumidade() {
   float humidity = dht.readHumidity();
 
-  if(isnan(humidity)) {
+  if (isnan(humidity)) {
     Serial.println("Falha ao ler do DHT11!");
     return "";
   }
@@ -62,13 +101,53 @@ String getHumidity() {
   return String(humidity);
 }
 
-void sendData() {
-  String humidity = getHumidity();
-  Serial.println(humidity);
+bool isHumidityValid(float humidity) {
+  // Checar se humidity é válida
+  return true;
 }
 
+void sendData() {
+  DynamicJsonDocument dados(2048);
+
+  float humidity = lerHumidade().toFloat();
+
+  if(isHumidityValid(humidity)) {
+    dados["humidity"] = humidity;
+  }
+
+  sendPostRequest(dados);
+}
+
+void sendPostRequest(DynamicJsonDocument dados) {
+  String url = webUrl;
+  url += "/api/v1/data";
+  http.begin(espClient, url);
+  http.addHeader("Cookie", "token=" + String(webToken));
+  http.addHeader("Content-Type", "application/json");
+
+  String requestBody;
+  serializeJson(dados, requestBody);
+
+  int httpResponseCode = http.POST(requestBody);
+
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    Serial.println("HTTP POST sent successfully");
+    Serial.println(response);
+  } else {
+    Serial.printf("Error sending HTTP POST request: %d\n", httpResponseCode);
+  }
+
+  http.end();
+}
+
+
 void loop() {
-  sendData();
+  if (WiFi.status() == WL_CONNECTED && webToken != "website_token_here") {
+    sendData();
+  }
+
+  server.handleClient();
 
   delay(1000);
 }
