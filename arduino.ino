@@ -101,24 +101,24 @@ String lerHumidade() {
   return String(humidity);
 }
 
-bool isHumidityValid(float humidity) {
+bool humidadeEstaValida(float humidity) {
   // Checar se humidity é válida
   return true;
 }
 
-void sendData() {
+void enviarDados() {
   DynamicJsonDocument dados(2048);
 
   float humidity = lerHumidade().toFloat();
 
-  if(isHumidityValid(humidity)) {
+  if(humidadeEstaValida(humidity)) {
     dados["humidity"] = humidity;
   }
 
-  sendPostRequest(dados);
+  fazerRequisicao(dados);
 }
 
-void sendPostRequest(DynamicJsonDocument dados) {
+void fazerRequisicao(DynamicJsonDocument dados) {
   String url = webUrl;
   url += "/api/v1/data";
   http.begin(espClient, url);
@@ -144,7 +144,7 @@ void sendPostRequest(DynamicJsonDocument dados) {
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED && webToken != "website_token_here") {
-    sendData();
+    enviarDados();
   }
 
   server.handleClient();
