@@ -2,9 +2,10 @@
 #include <DHT_U.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <ESP8266HTTPClient.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecureBearSSL.h>
 
 #define DHTPIN D5
 #define DHTTYPE DHT11
@@ -12,17 +13,15 @@
 // Wi-Fi
 WiFiClient espClient;
 PubSubClient client(espClient);
-const char* ssid = "ecogarden";
-const char* password = "camposss";
+const char* ssid = "ssid";
+const char* password = "password";
 
 // Local server
 ESP8266WebServer server(80);
 
-HTTPClient http;
-
 // Website
 const char* webUrl = "https://ecogarden.vercel.app";
-const char* webToken = "website_token_here";
+String webToken = "website_token_here";
 
 // Humidity sensor
 DHT dht(DHTPIN, DHTTYPE);
@@ -66,15 +65,12 @@ void definirServidorRemoto() {
   });
 
   server.on("/api/v1/token", HTTP_POST, []() {
-    String token = server.arg("plain");
-    
-    const char* webTokenStr = token.c_str();
-    webToken = webTokenStr;
+    webToken = server.arg("plain");
     
     server.send(200, "application/json", "{\"message\": \"Token received\"}");
-  }, lidarComServidorRemotoNaoEncontrado);
+  }, lidarServidorRemotoNaoEncontrado);
 
-  server.onNotFound(lidarComServidorRemotoNaoEncontrado);
+  server.onNotFound(lidarServidorRemotoNaoEncontrado);
   server.begin();
 }
 
@@ -119,28 +115,35 @@ void enviarDados() {
 }
 
 void fazerRequisicao(DynamicJsonDocument dados) {
+  WiFiClientSecure client;
+  client.setInsecure();
+  
   String url = webUrl;
   url += "/api/v1/data";
-  http.begin(espClient, url);
-  http.addHeader("Cookie", "token=" + String(webToken));
-  http.addHeader("Content-Type", "application/json");
+
+  HTTPClient https;
+  https.begin(client, url);
+  https.addHeader("Content-Type", "application/json");
+  https.addHeader("Cookie", "token=" + webToken);
 
   String requestBody;
   serializeJson(dados, requestBody);
+  
+  int resCode = https.POST(requestBody);
+  String resBody = https.getString();
 
-  int httpResponseCode = http.POST(requestBody);
-
-  if (httpResponseCode == 200) {
-    String response = http.getString();
-    Serial.println("HTTP POST sent successfully");
-    Serial.println(response);
+  if (resCode == 200) {
+    Serial.println("HTTPS POST sent successfully");
+    Serial.println("Response Body:");
+    Serial.println(resBody);
   } else {
-    Serial.printf("Error sending HTTP POST request: %d\n", httpResponseCode);
+    Serial.printf("Error sending HTTPS POST request: %d\n", resCode);
+    Serial.println("Response Body:");
+    Serial.println(resBody);
   }
 
-  http.end();
+  https.end();
 }
-
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED && webToken != "website_token_here") {
